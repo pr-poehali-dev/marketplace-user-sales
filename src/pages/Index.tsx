@@ -5,6 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import Icon from '@/components/ui/icon';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 
 interface Product {
   id: number;
@@ -13,6 +15,11 @@ interface Product {
   image: string;
   category: string;
   seller: string;
+}
+
+interface CartItem {
+  productId: number;
+  quantity: number;
 }
 
 interface SellerStats {
@@ -26,7 +33,11 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState('home');
   const [searchQuery, setSearchQuery] = useState('');
   const [favorites, setFavorites] = useState<number[]>([]);
-  const [cart, setCart] = useState<number[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [checkoutStep, setCheckoutStep] = useState<'cart' | 'checkout' | 'success'>('cart');
+  const [customerInfo, setCustomerInfo] = useState({ name: '', email: '', phone: '', address: '' });
+  const { toast } = useToast();
 
   const products: Product[] = [
     { id: 1, name: 'Винтажная камера', price: 15000, image: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=400', category: 'Электроника', seller: 'Антон К.' },
@@ -59,10 +70,77 @@ const Index = () => {
     );
   };
 
-  const toggleCart = (id: number) => {
+  const addToCart = (productId: number) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.productId === productId);
+      if (existing) {
+        return prev.map(item => 
+          item.productId === productId 
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+      return [...prev, { productId, quantity: 1 }];
+    });
+    toast({
+      title: 'Добавлено в корзину',
+      description: 'Товар успешно добавлен',
+      duration: 2000,
+    });
+  };
+
+  const removeFromCart = (productId: number) => {
+    setCart(prev => prev.filter(item => item.productId !== productId));
+  };
+
+  const updateQuantity = (productId: number, quantity: number) => {
+    if (quantity < 1) {
+      removeFromCart(productId);
+      return;
+    }
     setCart(prev => 
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+      prev.map(item => 
+        item.productId === productId ? { ...item, quantity } : item
+      )
     );
+  };
+
+  const getCartTotal = () => {
+    return cart.reduce((total, item) => {
+      const product = products.find(p => p.id === item.productId);
+      return total + (product?.price || 0) * item.quantity;
+    }, 0);
+  };
+
+  const handleCheckout = () => {
+    if (cart.length === 0) return;
+    setCheckoutStep('checkout');
+  };
+
+  const handleOrderComplete = () => {
+    if (!customerInfo.name || !customerInfo.email || !customerInfo.phone || !customerInfo.address) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните все поля',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setCheckoutStep('success');
+    setTimeout(() => {
+      setCart([]);
+      setIsCartOpen(false);
+      setCheckoutStep('cart');
+      setCustomerInfo({ name: '', email: '', phone: '', address: '' });
+      toast({
+        title: 'Заказ оформлен!',
+        description: 'Мы свяжемся с вами в ближайшее время',
+      });
+    }, 3000);
+  };
+
+  const isInCart = (productId: number) => {
+    return cart.some(item => item.productId === productId);
   };
 
   const filteredProducts = products.filter(p => 
@@ -95,11 +173,11 @@ const Index = () => {
       <CardFooter className="p-4 pt-0">
         <Button 
           className="w-full" 
-          onClick={() => toggleCart(product.id)}
-          variant={cart.includes(product.id) ? "secondary" : "default"}
+          onClick={() => addToCart(product.id)}
+          variant={isInCart(product.id) ? "secondary" : "default"}
         >
-          <Icon name={cart.includes(product.id) ? "Check" : "ShoppingCart"} size={18} className="mr-2" />
-          {cart.includes(product.id) ? "В корзине" : "В корзину"}
+          <Icon name={isInCart(product.id) ? "Check" : "ShoppingCart"} size={18} className="mr-2" />
+          {isInCart(product.id) ? "В корзине" : "В корзину"}
         </Button>
       </CardFooter>
     </Card>
@@ -120,7 +198,7 @@ const Index = () => {
                   </Badge>
                 )}
               </Button>
-              <Button variant="ghost" size="icon" className="relative">
+              <Button variant="ghost" size="icon" className="relative" onClick={() => setIsCartOpen(true)}>
                 <Icon name="ShoppingCart" size={22} />
                 {cart.length > 0 && (
                   <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
@@ -332,6 +410,173 @@ const Index = () => {
           </Tabs>
         </div>
       </header>
+
+      <Dialog open={isCartOpen} onOpenChange={setIsCartOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          {checkoutStep === 'cart' && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-2xl">Корзина</DialogTitle>
+              </DialogHeader>
+              
+              {cart.length === 0 ? (
+                <div className="py-12 text-center">
+                  <Icon name="ShoppingCart" size={64} className="mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-lg text-muted-foreground">Корзина пуста</p>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-4">
+                    {cart.map(item => {
+                      const product = products.find(p => p.id === item.productId);
+                      if (!product) return null;
+                      
+                      return (
+                        <Card key={item.productId} className="p-4">
+                          <div className="flex gap-4">
+                            <img 
+                              src={product.image} 
+                              alt={product.name} 
+                              className="w-24 h-24 object-cover rounded-lg"
+                            />
+                            <div className="flex-1">
+                              <h4 className="font-semibold text-lg mb-1">{product.name}</h4>
+                              <p className="text-sm text-muted-foreground mb-2">{product.seller}</p>
+                              <p className="text-lg font-bold text-primary">
+                                {product.price.toLocaleString('ru-RU')} ₽
+                              </p>
+                            </div>
+                            <div className="flex flex-col items-end justify-between">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeFromCart(item.productId)}
+                              >
+                                <Icon name="Trash2" size={18} className="text-destructive" />
+                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                                >
+                                  <Icon name="Minus" size={14} />
+                                </Button>
+                                <span className="w-8 text-center font-medium">{item.quantity}</span>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                                >
+                                  <Icon name="Plus" size={14} />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+
+                  <div className="border-t pt-4 mt-4">
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-lg font-medium">Итого:</span>
+                      <span className="text-2xl font-bold text-primary">
+                        {getCartTotal().toLocaleString('ru-RU')} ₽
+                      </span>
+                    </div>
+                    <Button size="lg" className="w-full" onClick={handleCheckout}>
+                      Оформить заказ
+                    </Button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {checkoutStep === 'checkout' && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-2xl">Оформление заказа</DialogTitle>
+              </DialogHeader>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Имя и фамилия</label>
+                  <Input 
+                    placeholder="Иван Петров"
+                    value={customerInfo.name}
+                    onChange={(e) => setCustomerInfo({...customerInfo, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Email</label>
+                  <Input 
+                    type="email" 
+                    placeholder="ivan@example.com"
+                    value={customerInfo.email}
+                    onChange={(e) => setCustomerInfo({...customerInfo, email: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Телефон</label>
+                  <Input 
+                    type="tel" 
+                    placeholder="+7 (999) 123-45-67"
+                    value={customerInfo.phone}
+                    onChange={(e) => setCustomerInfo({...customerInfo, phone: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Адрес доставки</label>
+                  <Input 
+                    placeholder="г. Москва, ул. Примерная, д. 1, кв. 1"
+                    value={customerInfo.address}
+                    onChange={(e) => setCustomerInfo({...customerInfo, address: e.target.value})}
+                  />
+                </div>
+
+                <div className="border-t pt-4">
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-lg font-medium">Сумма заказа:</span>
+                    <span className="text-2xl font-bold text-primary">
+                      {getCartTotal().toLocaleString('ru-RU')} ₽
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setCheckoutStep('cart')}>
+                  Назад
+                </Button>
+                <Button onClick={handleOrderComplete}>
+                  Подтвердить заказ
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {checkoutStep === 'success' && (
+            <div className="py-12 text-center animate-fade-in">
+              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Icon name="Check" size={40} className="text-green-600" />
+              </div>
+              <h3 className="text-2xl font-bold mb-2">Заказ оформлен!</h3>
+              <p className="text-muted-foreground mb-4">
+                Спасибо за покупку! Мы свяжемся с вами в ближайшее время.
+              </p>
+              <div className="bg-secondary p-4 rounded-lg">
+                <p className="text-sm font-medium mb-2">Детали заказа:</p>
+                <p className="text-sm text-muted-foreground">Сумма: {getCartTotal().toLocaleString('ru-RU')} ₽</p>
+                <p className="text-sm text-muted-foreground">Email: {customerInfo.email}</p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
